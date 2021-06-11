@@ -45,7 +45,7 @@ setup() {
 }
 
 setup-tmp-dir() {
-  TMPDIR=$(mktemp -d /tmp/push-to-k8s)
+  TMPDIR=$(mktemp -d /tmp/push-to-k8s.XXX)
   if [[ ! -d $TMPDIR ]]
   then
     echo "CRITICAL: Creating TMPDIR"
@@ -66,14 +66,15 @@ cleanup-tmp-dir() {
 }
 
 get-source-secret() {
-  kubectl -n $SYNCNAMESPACE get secret -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' > ${TMPDIR}/secret.yaml
+  kubectl -n $SYNCNAMESPACE get secret -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' > ${TMPDIR}/secret.yaml
 }
 
 get-source-configmap() {
-  kubectl -n $SYNCNAMESPACE get configmap -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' > ${TMPDIR}/configmap.yaml
+  kubectl -n $SYNCNAMESPACE get configmap -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' > ${TMPDIR}/configmap.yaml
 }
 
 build-source-yaml() {
+  echo "Getting source yamls..."
   get-source-secret
   get-source-configmap
 }
@@ -81,8 +82,10 @@ build-source-yaml() {
 get-namespaces() {
     if [[ $LABELSELECTOR == "exclude" ]]
     then
+      echo "Excluding namespaces using label push-to-k8s"
       namespaces=`kubectl get namespace --selector='!push-to-k8s' -o name | awk -F '/' '{print $2}'`
     else
+      echo "Including namespaces using label push-to-k8s"
       namespaces=`kubectl get namespace --selector='push-to-k8s' -o name | awk -F '/' '{print $2}'`
     fi
 }
