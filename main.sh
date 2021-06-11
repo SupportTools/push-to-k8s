@@ -66,11 +66,11 @@ cleanup-tmp-dir() {
 }
 
 get-source-secret() {
-  kubectl -n $SYNCNAMESPACE get secret -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' > ${TMPDIR}/secret.yaml
+  kubectl -n $SYNCNAMESPACE get secret -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' | grep -v 'uid:' | grep -v 'resourceVersion:' > ${TMPDIR}/secret.yaml
 }
 
 get-source-configmap() {
-  kubectl -n $SYNCNAMESPACE get configmap -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' > ${TMPDIR}/configmap.yaml
+  kubectl -n $SYNCNAMESPACE get configmap -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' | grep -v 'uid:' | grep -v 'resourceVersion:' > ${TMPDIR}/configmap.yaml
 }
 
 build-source-yaml() {
