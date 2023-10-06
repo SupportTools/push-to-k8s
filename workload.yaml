@@ -47,9 +47,16 @@ spec:
           value: "push-to-k8s"
         - name: LABELSELECTOR
           value: "exclude"
-        image: rancherlabs/swiss-army-knife
+        image: supporttools/kube-builder
         imagePullPolicy: IfNotPresent
         name: push-to-k8s
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 10m
+            memory: 10Mi
         volumeMounts:
         - mountPath: /root/bin/
           name: push-to-k8s
