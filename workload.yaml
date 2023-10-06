@@ -48,7 +48,7 @@ spec:
         - name: LABELSELECTOR
           value: "exclude"
         image: supporttools/kube-builder
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         name: push-to-k8s
         resources:
           limits:
