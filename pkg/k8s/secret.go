@@ -34,9 +34,11 @@ func syncSecretToNamespace(clientset *kubernetes.Clientset, sourceSecret *v1.Sec
 	// Skip namespaces with the exclude label
 	if excludeNamespaceLabel != "" {
 		ns, err := clientset.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
-		if err == nil && ns.Labels[excludeNamespaceLabel] != "" {
-			log.Infof("Skipping namespace %s due to exclude label %s", namespace, excludeNamespaceLabel)
-			return nil
+		if err == nil && ns.Labels != nil {
+			if _, exists := ns.Labels[excludeNamespaceLabel]; exists {
+				log.Infof("Skipping namespace %s due to exclude label %s", namespace, excludeNamespaceLabel)
+				return nil
+			}
 		}
 	}
 
@@ -184,9 +186,11 @@ func WatchNamespaces(clientset *kubernetes.Clientset, sourceNamespace, excludeNa
 			}
 
 			// Skip namespaces with the exclude label
-			if excludeNamespaceLabel != "" && ns.Labels[excludeNamespaceLabel] != "" {
-				log.Infof("Skipping namespace %s due to exclude label %s", ns.Name, excludeNamespaceLabel)
-				return
+			if excludeNamespaceLabel != "" && ns.Labels != nil {
+				if _, exists := ns.Labels[excludeNamespaceLabel]; exists {
+					log.Infof("Skipping namespace %s due to exclude label %s", ns.Name, excludeNamespaceLabel)
+					return
+				}
 			}
 
 			// Sync secrets to the new namespace

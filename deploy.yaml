@@ -1,0 +1,208 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: push-to-k8s
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: push-to-k8s
+  namespace: push-to-k8s
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: push-to-k8s
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: push-to-k8s
+  namespace: push-to-k8s
+---
+apiVersion: v1
+data:
+  main.sh: |-
+    #!/bin/bash
+
+    setup() {
+      while getopts ":s:n:l:fh" opt; do
+      case $opt in
+        s)
+          SLEEP="-s ${OPTARG}"
+          ;;
+        n)
+          SYNCNAMESPACE="-n ${OPTARG}"
+          ;;
+        l)
+          LABELSELECTOR="-l ${OPTARG}"
+          ;;
+        h)
+          help && exit 0
+          ;;
+        :)
+          techo "Option -$OPTARG requires an argument."
+          exit 1
+          ;;
+        *)
+          help && exit 0
+      esac
+      done
+
+      if [[ -z $SLEEP ]]
+      then
+        SLEEP=360
+      fi
+      if [[ -z $SYNCNAMESPACE ]]
+      then
+        SYNCNAMESPACE="push-to-k8s"
+      fi
+      if [[ -z $LABELSELECTOR ]]
+      then
+        LABELSELECTOR="exclude"
+      else
+        if [[ ! $LABELSELECTOR == "exclude" ]] && [[ ! $LABELSELECTOR == "include" ]]
+        then
+           echo "Need to set the label selector to exclude or include"
+           exit 1
+        fi
+      fi
+    }
+
+    setup-tmp-dir() {
+      TMPDIR=$(mktemp -d /tmp/push-to-k8s.XXX)
+      if [[ ! -d $TMPDIR ]]
+      then
+        echo "CRITICAL: Creating TMPDIR"
+        exit 2
+      else
+        echo "Created ${TMPDIR}"
+      fi
+    }
+
+    cleanup-tmp-dir() {
+      echo "Cleaning up TMPDIR"
+      rm -rf ${TMPDIR}
+      if [[ -d $TMPDIR ]]
+      then
+        echo "CRITICAL: TMPDIR wasn't deleted"
+        exit 2
+      fi
+    }
+
+    get-source-secret() {
+      kubectl -n $SYNCNAMESPACE get secret -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' | grep -v 'uid:' | grep -v 'resourceVersion:' > ${TMPDIR}/secret.yaml
+    }
+
+    get-source-configmap() {
+      kubectl -n $SYNCNAMESPACE get configmap -l push-to-k8s=source -o yaml | grep -v 'push-to-k8s: source' | grep -v 'namespace:' | grep -v 'uid:' | grep -v 'resourceVersion:' > ${TMPDIR}/configmap.yaml
+    }
+
+    build-source-yaml() {
+      echo "Getting source yamls..."
+      get-source-secret
+      get-source-configmap
+    }
+
+    get-namespaces() {
+        if [[ $LABELSELECTOR == "exclude" ]]
+        then
+          echo "Excluding namespaces using label push-to-k8s"
+          namespaces=`kubectl get namespace --selector='!push-to-k8s' -o name | awk -F '/' '{print $2}'`
+        else
+          echo "Including namespaces using label push-to-k8s"
+          namespaces=`kubectl get namespace --selector='push-to-k8s' -o name | awk -F '/' '{print $2}'`
+        fi
+    }
+
+    setup
+    while true
+    do
+      setup-tmp-dir
+      build-source-yaml
+      get-namespaces
+      for namespace in $namespaces
+      do
+        echo "Namespace: $namespace"
+        if [[ $namespace == $SYNCNAMESPACE ]]
+        then
+          echo "Skipping source namespace"
+        else
+          echo "Pushing out YAML"
+          kubectl -n $namespace apply -f ${TMPDIR}/
+        fi
+      done
+      cleanup-tmp-dir
+      sleep ${SLEEP}
+    done
+kind: ConfigMap
+metadata:
+  name: push-to-k8s
+  namespace: push-to-k8s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: push-to-k8s
+    objectset.rio.cattle.io/hash: f93cacf83132ea19f92793f9a45919ea175c2bcb
+  name: push-to-k8s
+  namespace: push-to-k8s
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: push-to-k8s
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: push-to-k8s
+    spec:
+      containers:
+        - args:
+            - /root/bin/main.sh
+          env:
+            - name: SLEEP
+              value: '60'
+            - name: SYNCNAMESPACE
+              value: push-to-k8s
+            - name: LABELSELECTOR
+              value: exclude
+          image: rancherlabs/swiss-army-knife
+          imagePullPolicy: IfNotPresent
+          name: push-to-k8s
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /root/bin/
+              name: push-to-k8s
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: push-to-k8s
+      serviceAccountName: push-to-k8s
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - configMap:
+            defaultMode: 493
+            items:
+              - key: main.sh
+                mode: 493
+                path: main.sh
+            name: push-to-k8s
+            optional: false
+          name: push-to-k8s
+---
