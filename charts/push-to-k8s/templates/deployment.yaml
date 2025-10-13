@@ -1,56 +1,76 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "push-to-k8s"
+  name: {{ include "push-to-k8s.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
-    app: "push-to-k8s"
+    {{- include "push-to-k8s.labels" . | nindent 4 }}
+  {{- if .Values.settings.metrics.enabled }}
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "{{ .Values.settings.metrics.port }}"
     prometheus.io/path: "/metrics"
+  {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: "push-to-k8s"
+      {{- include "push-to-k8s.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
+      {{- if .Values.settings.metrics.enabled }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "{{ .Values.settings.metrics.port }}"
         prometheus.io/path: "/metrics"
+      {{- end }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
-        app: "push-to-k8s"
+        {{- include "push-to-k8s.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: push-to-k8s
+      serviceAccountName: {{ include "push-to-k8s.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: metrics
               containerPort: {{ .Values.settings.metrics.port }}
               protocol: TCP
+          {{- if .Values.probes.liveness.enabled }}
           livenessProbe:
             httpGet:
               path: /healthz
               port: metrics
-              initialDelaySeconds: 10
-              timeoutSeconds: 2
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: metrics
-              initialDelaySeconds: 5
-              timeoutSeconds: 1
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
           env:
             - name: DEBUG
               value: "{{ .Values.settings.debug }}"
@@ -64,8 +84,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          {{- with .Values.resources }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

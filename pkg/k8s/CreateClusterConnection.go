@@ -26,7 +26,6 @@ func CreateClusterConnection(logger *logrus.Logger) (*kubernetes.Clientset, erro
 		if err != nil {
 			metrics.K8sConnectionFailures.WithLabelValues(source, err.Error()).Inc()
 			logger.Fatalf("Failed to create config from KUBECONFIG: %v", err)
-			return nil, err
 		}
 	} else {
 		logger.Info("KUBECONFIG not set, using in-cluster config")
@@ -34,7 +33,6 @@ func CreateClusterConnection(logger *logrus.Logger) (*kubernetes.Clientset, erro
 		if err != nil {
 			metrics.K8sConnectionFailures.WithLabelValues(source, err.Error()).Inc()
 			logger.Fatalf("Failed to create in-cluster config: %v", err)
-			return nil, err
 		}
 	}
 
@@ -43,7 +41,6 @@ func CreateClusterConnection(logger *logrus.Logger) (*kubernetes.Clientset, erro
 	if err != nil {
 		metrics.K8sConnectionFailures.WithLabelValues(source, err.Error()).Inc()
 		logger.Fatalf("Failed to create clientset: %v", err)
-		return nil, err
 	}
 
 	metrics.K8sConnectionSuccess.WithLabelValues(source).Inc()

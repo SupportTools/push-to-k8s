@@ -63,8 +63,8 @@ spec:
       serviceAccountName: push-to-k8s
       containers:
         - name: push-to-k8s
-          image: cube8021/push-to-k8s:latest
-          imagePullPolicy: Always
+          image: cube8021/push-to-k8s:test
+          imagePullPolicy: IfNotPresent
           ports:
             - name: metrics
               containerPort: 9090
@@ -83,13 +83,13 @@ spec:
             timeoutSeconds: 1
           env:
             - name: DEBUG
-              value: "false"
+              value: "true"  # Enable debug for testing
             - name: METRICS_PORT
               value: "9090"
             - name: EXCLUDE_NAMESPACE_LABEL
               value: ""
             - name: SYNC_INTERVAL
-              value: "15"
+              value: "5"  # 5 minutes for faster testing
             - name: NAMESPACE
               value: "push-to-k8s"
           resources:
@@ -99,4 +99,3 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
----

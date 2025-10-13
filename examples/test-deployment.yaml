@@ -1,0 +1,126 @@
+---
+# Example deployment that uses synced secrets
+# This demonstrates how applications in any namespace can use the secrets
+# that were synced from the source namespace
+#
+# Prerequisites:
+# 1. Apply source namespace: kubectl apply -f examples/source-namespace.yaml
+# 2. Apply test secrets: kubectl apply -f examples/test-secret.yaml
+# 3. Wait for controller to sync secrets to target namespace
+# 4. Apply this deployment: kubectl apply -f examples/test-deployment.yaml
+#
+# Verify secrets are synced:
+#   kubectl get secrets -n test-app
+#   kubectl describe secret registry-credentials -n test-app
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-app
+  labels:
+    purpose: testing
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secret-consumer
+  namespace: test-app
+  labels:
+    app: secret-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secret-consumer
+  template:
+    metadata:
+      labels:
+        app: secret-consumer
+    spec:
+      containers:
+      - name: alpine
+        image: alpine:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Testing synced secrets availability..."
+          echo "=================================="
+          echo ""
+          echo "Registry Credentials:"
+          echo "  Username: $(cat /secrets/registry/username)"
+          echo "  Registry: $(cat /secrets/registry/registry)"
+          echo ""
+          echo "API Keys:"
+          echo "  GitHub Token: $(cat /secrets/api/github-token | cut -c1-15)..."
+          echo ""
+          echo "TLS Certificate:"
+          ls -lh /secrets/tls/
+          echo ""
+          echo "All secrets successfully mounted and accessible!"
+          echo "=================================="
+          echo ""
+          echo "Keeping container running for 1 hour..."
+          sleep 3600
+        volumeMounts:
+        - name: registry-credentials
+          mountPath: /secrets/registry
+          readOnly: true
+        - name: api-keys
+          mountPath: /secrets/api
+          readOnly: true
+        - name: tls-cert
+          mountPath: /secrets/tls
+          readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+      volumes:
+      - name: registry-credentials
+        secret:
+          secretName: registry-credentials
+      - name: api-keys
+        secret:
+          secretName: api-keys
+      - name: tls-cert
+        secret:
+          secretName: tls-cert
+---
+# Example: Using registry credentials as imagePullSecrets
+# This shows another common use case for synced secrets
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: private-image-app
+  namespace: test-app
+  labels:
+    app: private-image-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: private-image-app
+  template:
+    metadata:
+      labels:
+        app: private-image-app
+    spec:
+      # Automatically use synced registry credentials for pulling private images
+      imagePullSecrets:
+      - name: registry-credentials
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi

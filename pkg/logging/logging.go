@@ -9,12 +9,8 @@ import (
 var logger *logrus.Logger
 
 // SetupLogging initializes the logger with the appropriate settings.
-func SetupLogging() *logrus.Logger {
-	// Get the debug from environment variable
-	debug := false
-	if os.Getenv("DEBUG") == "true" {
-		debug = true
-	}
+// Pass debug=true to enable debug-level logging.
+func SetupLogging(debug bool) *logrus.Logger {
 	if logger == nil {
 		logger = logrus.New()
 		logger.SetOutput(os.Stdout)

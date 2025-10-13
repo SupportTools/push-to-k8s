@@ -1,24 +1,31 @@
 apiVersion: v2
 name: push-to-k8s
-description: A Helm chart for Kubernetes
+description: A Kubernetes controller that automatically synchronizes labeled secrets from a source namespace to all other namespaces in the cluster
 
-# A chart can be either an 'application' or a 'library' chart.
-#
-# Application charts are a collection of templates that can be packaged into versioned archives
-# to be deployed.
-#
-# Library charts provide useful utilities or functions for the chart developer. They're included as
-# a dependency of application charts to inject those utilities and functions into the rendering
-# pipeline. Library charts do not define any templates and therefore cannot be deployed.
+# Application chart for deploying the push-to-k8s controller
 type: application
 
-# This is the chart version. This version number should be incremented each time you make changes
-# to the chart and its templates, including the app version.
-# Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.1.0
+# Chart version - incremented with chart changes
+# Follows Semantic Versioning (https://semver.org/)
+version: 1.0.0
 
-# This is the version number of the application being deployed. This version number should be
-# incremented each time you make changes to the application. Versions are not expected to
-# follow Semantic Versioning. They should reflect the version the application is using.
-# It is recommended to use it with quotes.
-appVersion: "1.16.0"
+# Application version - matches the push-to-k8s controller version
+appVersion: "latest"
+
+keywords:
+  - kubernetes
+  - secrets
+  - sync
+  - automation
+  - controller
+
+home: https://github.com/supporttools/push-to-k8s
+sources:
+  - https://github.com/supporttools/push-to-k8s
+
+maintainers:
+  - name: mattmattox
+    email: mmattox@support.tools
+
+# Optional: icon URL
+# icon: https://cdn.support.tools/push-to-k8s/logo.png

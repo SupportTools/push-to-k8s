@@ -1,15 +1,30 @@
-apiVersion: v1
+apiVersion: v2
 name: push-to-k8s
+description: A Kubernetes controller that automatically synchronizes labeled secrets from a source namespace to all other namespaces in the cluster
+
+# Application chart for deploying the push-to-k8s controller
+type: application
+
+# Chart version - dynamically set by CI/CD
 version: ${CHART_VERSION}
+
+# Application version - matches the push-to-k8s controller version
 appVersion: ${APP_VERSION}
-description: Push-to-K8s is a tool that syncs secrets from a source namespace to all other namespaces in a Kubernetes cluster. It periodically checks for changes and keeps the secrets in sync across all namespaces.
+
 keywords:
-- kubernetes
-- backup
+  - kubernetes
+  - secrets
+  - sync
+  - automation
+  - controller
+
 home: https://github.com/supporttools/push-to-k8s
 sources:
-- https://github.com/supporttools/push-to-k8s
+  - https://github.com/supporttools/push-to-k8s
+
 maintainers:
-- name: mattmattox
-  email: mmattox@support.tools
-icon: https://cdn.support.tools/push-to-k8s/logo.png
+  - name: mattmattox
+    email: mmattox@support.tools
+
+# Optional: icon URL
+# icon: https://cdn.support.tools/push-to-k8s/logo.png

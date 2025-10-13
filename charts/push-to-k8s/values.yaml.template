@@ -33,7 +33,8 @@ image:
   pullPolicy: Always
 
   # Overrides the image tag whose default is the chart appVersion
-  tag: ""
+  # This is dynamically set by CI/CD
+  tag: "${IMAGE_TAG}"
 
 # Secrets for pulling images from private registries
 imagePullSecrets: []

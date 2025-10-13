@@ -1,0 +1,24 @@
+---
+# Example namespace with exclusion label
+# Namespaces with the exclusion label will NOT receive synced secrets
+#
+# To use this feature, set the EXCLUDE_NAMESPACE_LABEL environment variable
+# in the controller deployment:
+#   - name: EXCLUDE_NAMESPACE_LABEL
+#     value: "push-to-k8s-exclude"
+#
+# Then apply this manifest to create a namespace that won't receive secrets
+#
+# Usage:
+#   kubectl apply -f examples/excluded-namespace.yaml
+#
+# You can also add the exclusion label to existing namespaces:
+#   kubectl label namespace kube-system push-to-k8s-exclude=true
+#   kubectl label namespace kube-public push-to-k8s-exclude=true
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: no-sync-namespace
+  labels:
+    push-to-k8s-exclude: "true"
+    purpose: testing-exclusion

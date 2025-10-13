@@ -1,0 +1,9 @@
+---
+# Source namespace where secrets with the push-to-k8s=source label will be created
+# The controller will sync these labeled secrets to all other namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: push-to-k8s
+  labels:
+    purpose: secret-source

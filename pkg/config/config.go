@@ -15,20 +15,30 @@ type Config struct {
 	SyncInterval          int // Interval in minutes
 }
 
-// CFG holds the configuration for the application.
-var CFG Config
-
 // LoadConfigFromEnv loads the configuration from environment variables.
 func LoadConfigFromEnv() Config {
-	config := Config{
-		Debug:                 parseEnvBool("DEBUG"),
-		MetricsPort:           parseEnvInt("METRICS_PORT", 9090),
-		Namespace:             getEnvOrDefault("NAMESPACE", ""),
-		ExcludeNamespaceLabel: getEnvOrDefault("EXCLUDE_NAMESPACE_LABEL", ""),
-		SyncInterval:          parseEnvInt("SYNC_INTERVAL", 15), // Default to 15 minutes
+	metricsPort := parseEnvInt("METRICS_PORT", 9090)
+	syncInterval := parseEnvInt("SYNC_INTERVAL", 15) // Default to 15 minutes
+
+	// Validate MetricsPort range (1-65535)
+	if metricsPort < 1 || metricsPort > 65535 {
+		log.Printf("WARNING: METRICS_PORT value %d is out of valid range (1-65535). Using default value: 9090", metricsPort)
+		metricsPort = 9090
 	}
 
-	CFG = config
+	// Validate SyncInterval range (1-1440 minutes = 24 hours)
+	if syncInterval < 1 || syncInterval > 1440 {
+		log.Printf("WARNING: SYNC_INTERVAL value %d is out of valid range (1-1440 minutes). Using default value: 15", syncInterval)
+		syncInterval = 15
+	}
+
+	config := Config{
+		Debug:                 parseEnvBool("DEBUG"),
+		MetricsPort:           metricsPort,
+		Namespace:             getEnvOrDefault("NAMESPACE", ""),
+		ExcludeNamespaceLabel: getEnvOrDefault("EXCLUDE_NAMESPACE_LABEL", ""),
+		SyncInterval:          syncInterval,
+	}
 
 	return config
 }

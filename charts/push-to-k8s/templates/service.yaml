@@ -1,19 +1,22 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: "push-to-k8s"
+  name: {{ include "push-to-k8s.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
-    app: "push-to-k8s"
+    {{- include "push-to-k8s.labels" . | nindent 4 }}
+  {{- if .Values.settings.metrics.enabled }}
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/port: "9090"
+    prometheus.io/port: "{{ .Values.settings.metrics.port }}"
     prometheus.io/path: "/metrics"
+  {{- end }}
 spec:
-  type: ClusterIP
+  type: {{ .Values.service.type }}
   ports:
-    - port: 9090
-      targetPort: 9090
+    - port: {{ .Values.service.port }}
+      targetPort: metrics
       protocol: TCP
       name: metrics
   selector:
-    app: "push-to-k8s"
+    {{- include "push-to-k8s.selectorLabels" . | nindent 4 }}

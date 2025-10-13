@@ -1,0 +1,103 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your push-to-k8s controller has been deployed to namespace: {{ .Release.Namespace }}
+
+📦 Release Name: {{ .Release.Name }}
+🏷️  Chart Version: {{ .Chart.Version }}
+🐳 App Version: {{ .Chart.AppVersion }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 GETTING STARTED
+
+1. Check the controller status:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "push-to-k8s.name" . }}
+
+2. View controller logs:
+
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "push-to-k8s.name" . }} -f
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 USAGE
+
+To synchronize a secret across all namespaces:
+
+1. Create a secret in the {{ .Release.Namespace }} namespace:
+
+   kubectl create secret generic my-secret \
+     --from-literal=key=value \
+     -n {{ .Release.Namespace }}
+
+2. Label it with the sync label:
+
+   kubectl label secret my-secret push-to-k8s=source -n {{ .Release.Namespace }}
+
+3. Verify synchronization to other namespaces:
+
+   kubectl get secret my-secret -n default
+   kubectl get secret my-secret -n production
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 MONITORING
+{{- if .Values.settings.metrics.enabled }}
+
+Access Prometheus metrics:
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "push-to-k8s.fullname" . }} {{ .Values.settings.metrics.port }}:{{ .Values.settings.metrics.port }}
+
+   # View metrics
+   curl http://localhost:{{ .Values.settings.metrics.port }}/metrics | grep k8s_
+
+Check health endpoints:
+
+   # Liveness probe
+   curl http://localhost:{{ .Values.settings.metrics.port }}/healthz
+
+   # Readiness probe
+   curl http://localhost:{{ .Values.settings.metrics.port }}/readyz
+{{- else }}
+
+Metrics are disabled. Enable them by setting:
+   --set settings.metrics.enabled=true
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚙️  CONFIGURATION
+
+Current settings:
+  - Debug Mode: {{ .Values.settings.debug }}
+  - Sync Interval: {{ .Values.settings.SyncInterval }} minutes
+  - Metrics Port: {{ .Values.settings.metrics.port }}
+{{- if .Values.settings.ExcludeNamespaceLabel }}
+  - Exclusion Label: {{ .Values.settings.ExcludeNamespaceLabel }}
+{{- else }}
+  - Exclusion Label: (not set)
+{{- end }}
+
+To exclude a namespace from receiving synced secrets:
+{{- if .Values.settings.ExcludeNamespaceLabel }}
+
+   kubectl label namespace <namespace-name> {{ .Values.settings.ExcludeNamespaceLabel }}=true
+{{- else }}
+
+   First set ExcludeNamespaceLabel value, then label namespaces to exclude them.
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DOCUMENTATION
+
+Full documentation: https://github.com/supporttools/push-to-k8s
+Chart README: charts/push-to-k8s/README.md
+
+For issues or questions:
+  GitHub: https://github.com/supporttools/push-to-k8s/issues
+  Email: mmattox@support.tools
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Happy secret syncing! 🔐✨

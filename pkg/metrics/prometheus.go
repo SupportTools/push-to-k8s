@@ -92,6 +92,7 @@ func StartMetricsServer(addr string, logger *logrus.Logger) {
 			<h1>Kubernetes Metrics Server</h1>
 			<p><a href="/metrics">Metrics</a></p>
 			<p><a href="/healthz">Health</a></p>
+			<p><a href="/readyz">Readiness</a></p>
 			<p><a href="/version">Version</a></p>
 			</body>
 			</html>`))
@@ -104,6 +105,13 @@ func StartMetricsServer(addr string, logger *logrus.Logger) {
 		_, err := w.Write([]byte("OK"))
 		if err != nil {
 			logger.Errorf("Failed to write response for /healthz endpoint: %v", err)
+		}
+	})
+
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write([]byte("OK"))
+		if err != nil {
+			logger.Errorf("Failed to write response for /readyz endpoint: %v", err)
 		}
 	})
 
@@ -134,7 +142,9 @@ func StartMetricsServer(addr string, logger *logrus.Logger) {
 // SyncMetrics updates Prometheus metrics for namespaces and secrets.
 func SyncMetrics(clientset *kubernetes.Clientset, sourceNamespace string, logger *logrus.Logger) {
 	// Fetch all namespaces
-	namespaces, err := clientset.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		logger.Errorf("Failed to list namespaces: %v", err)
 		return
@@ -142,7 +152,9 @@ func SyncMetrics(clientset *kubernetes.Clientset, sourceNamespace string, logger
 	NamespaceTotal.Set(float64(len(namespaces.Items)))
 
 	// Fetch source secrets
-	secrets, err := clientset.CoreV1().Secrets(sourceNamespace).List(context.TODO(), metav1.ListOptions{
+	secretsCtx, secretsCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer secretsCancel()
+	secrets, err := clientset.CoreV1().Secrets(sourceNamespace).List(secretsCtx, metav1.ListOptions{
 		LabelSelector: "push-to-k8s=source",
 	})
 	if err != nil {
@@ -173,7 +185,9 @@ func SyncMetrics(clientset *kubernetes.Clientset, sourceNamespace string, logger
 func isNamespaceSynced(clientset *kubernetes.Clientset, namespace string, sourceSecrets []v1.Secret) bool {
 	// Example: Check if the namespace has all source secrets
 	for _, secret := range sourceSecrets {
-		_, err := clientset.CoreV1().Secrets(namespace).Get(context.TODO(), secret.Name, metav1.GetOptions{})
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
