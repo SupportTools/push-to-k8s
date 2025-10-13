@@ -250,7 +250,7 @@ func WatchNamespaces(ctx context.Context, clientset kubernetes.Interface, source
 	})
 	if err != nil {
 		log.Errorf("Failed to add event handler for namespace informer: %v", err)
-		return err
+		// Continue execution despite error, as this is a background watcher
 	}
 
 	// Start the informer with a stop channel
