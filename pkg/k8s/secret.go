@@ -216,7 +216,7 @@ func WatchNamespaces(ctx context.Context, clientset kubernetes.Interface, source
 		}
 	}()
 
-	namespaceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := namespaceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns, ok := obj.(*v1.Namespace)
 			if !ok {
@@ -248,6 +248,10 @@ func WatchNamespaces(ctx context.Context, clientset kubernetes.Interface, source
 			}
 		},
 	})
+	if err != nil {
+		log.Errorf("Failed to add event handler for namespace informer: %v", err)
+		return err
+	}
 
 	// Start the informer with a stop channel
 	stopCh := make(chan struct{})
