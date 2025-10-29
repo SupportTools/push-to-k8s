@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -270,4 +271,295 @@ func WatchNamespaces(ctx context.Context, clientset kubernetes.Interface, source
 	<-ctx.Done()
 	log.Info("Namespace watcher received shutdown signal")
 	close(stopCh)
+}
+
+// SecretEvent represents a secret change event for the debounce queue.
+type SecretEvent struct {
+	EventType string     // "add", "update", or "delete"
+	Secret    *v1.Secret // The secret object (nil for delete events that only have name)
+	Name      string     // Secret name (used for delete events)
+}
+
+// syncSingleSecretToAllNamespaces syncs a specific secret to all target namespaces.
+// This is more efficient than SyncSecrets() when only one secret changed.
+func syncSingleSecretToAllNamespaces(clientset kubernetes.Interface, secret *v1.Secret, sourceNamespace, excludeNamespaceLabel string, log *logrus.Logger) error {
+	// List all namespaces
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list namespaces: %w", err)
+	}
+
+	// Sync secret to all namespaces (excluding the source namespace and excluded namespaces)
+	for _, ns := range namespaces.Items {
+		if ns.Name == sourceNamespace {
+			continue // Skip the source namespace
+		}
+
+		if excludeNamespaceLabel != "" && ns.Labels != nil {
+			if _, exists := ns.Labels[excludeNamespaceLabel]; exists {
+				log.Debugf("Skipping namespace %s due to exclude label %s", ns.Name, excludeNamespaceLabel)
+				continue
+			}
+		}
+
+		if err := syncSecretToNamespace(clientset, secret, ns.Name, excludeNamespaceLabel, log); err != nil {
+			log.Warnf("Failed to sync secret %s to namespace %s: %v", secret.Name, ns.Name, err)
+		} else {
+			log.Debugf("Secret %s synced to namespace %s", secret.Name, ns.Name)
+		}
+	}
+	return nil
+}
+
+// deleteSingleSecretFromAllNamespaces removes a specific secret from all target namespaces.
+func deleteSingleSecretFromAllNamespaces(clientset kubernetes.Interface, secretName, sourceNamespace, excludeNamespaceLabel string, log *logrus.Logger) error {
+	// List all namespaces
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list namespaces: %w", err)
+	}
+
+	// Delete secret from all namespaces (excluding the source namespace and excluded namespaces)
+	for _, ns := range namespaces.Items {
+		if ns.Name == sourceNamespace {
+			continue // Skip the source namespace
+		}
+
+		if excludeNamespaceLabel != "" && ns.Labels != nil {
+			if _, exists := ns.Labels[excludeNamespaceLabel]; exists {
+				log.Debugf("Skipping namespace %s due to exclude label %s", ns.Name, excludeNamespaceLabel)
+				continue
+			}
+		}
+
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := clientset.CoreV1().Secrets(ns.Name).Delete(deleteCtx, secretName, metav1.DeleteOptions{})
+		deleteCancel()
+
+		if err != nil {
+			// Ignore not found errors (secret may not exist in this namespace)
+			if !isNotFoundError(err) {
+				log.Warnf("Failed to delete secret %s from namespace %s: %v", secretName, ns.Name, err)
+			}
+		} else {
+			log.Infof("Deleted secret %s from namespace %s", secretName, ns.Name)
+		}
+	}
+	return nil
+}
+
+// isNotFoundError checks if an error is a Kubernetes "not found" error.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if error message contains "not found"
+	return err.Error() != "" && (err.Error() == "not found" || contains(err.Error(), "not found"))
+}
+
+// contains checks if a string contains a substring.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// processDebouncedSecretQueue processes secret events from the queue with debounce logic.
+// It collects events over a debounce window and processes them in batches.
+func processDebouncedSecretQueue(ctx context.Context, eventQueue <-chan SecretEvent, debounceWindow time.Duration, rateLimiter *rate.Limiter, clientset kubernetes.Interface, sourceNamespace, excludeNamespaceLabel string, log *logrus.Logger) {
+	var (
+		timer          *time.Timer
+		pendingEvents  = make(map[string]SecretEvent) // Map of secret name -> latest event
+	)
+
+	processBatch := func() {
+		if len(pendingEvents) == 0 {
+			return
+		}
+
+		log.Infof("Processing batch of %d secret events", len(pendingEvents))
+
+		for _, event := range pendingEvents {
+			// Wait for rate limiter token
+			if err := rateLimiter.Wait(ctx); err != nil {
+				log.Warnf("Rate limiter error: %v", err)
+				continue
+			}
+
+			switch event.EventType {
+			case "add", "update":
+				if event.Secret != nil {
+					log.Infof("Syncing secret %s to all namespaces (event: %s)", event.Secret.Name, event.EventType)
+					if err := syncSingleSecretToAllNamespaces(clientset, event.Secret, sourceNamespace, excludeNamespaceLabel, log); err != nil {
+						log.Errorf("Failed to sync secret %s: %v", event.Secret.Name, err)
+					}
+				}
+			case "delete":
+				log.Infof("Deleting secret %s from all namespaces", event.Name)
+				if err := deleteSingleSecretFromAllNamespaces(clientset, event.Name, sourceNamespace, excludeNamespaceLabel, log); err != nil {
+					log.Errorf("Failed to delete secret %s: %v", event.Name, err)
+				}
+			}
+		}
+
+		// Clear pending events after processing
+		pendingEvents = make(map[string]SecretEvent)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Secret queue processor shutting down...")
+			if timer != nil {
+				timer.Stop()
+			}
+			// Process any remaining events before shutdown
+			processBatch()
+			return
+
+		case event := <-eventQueue:
+			// Add/update event in pending map (overwrites older events for same secret)
+			if event.EventType == "delete" {
+				pendingEvents[event.Name] = event
+			} else if event.Secret != nil {
+				pendingEvents[event.Secret.Name] = event
+			}
+
+			// Reset or create timer
+			if timer == nil {
+				timer = time.NewTimer(debounceWindow)
+			} else {
+				if !timer.Stop() {
+					// Drain the channel if timer already fired
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(debounceWindow)
+			}
+
+		case <-timer.C:
+			// Debounce window expired, process batch
+			processBatch()
+			timer = nil
+		}
+	}
+}
+
+// WatchSourceSecrets starts a secret informer to watch for changes to source secrets
+// and triggers synchronization to all target namespaces via a debounced queue.
+func WatchSourceSecrets(ctx context.Context, clientset kubernetes.Interface, sourceNamespace, excludeNamespaceLabel string, debounceSeconds int, rateLimit int, log *logrus.Logger) {
+	// Create rate limiter (ops per second)
+	rateLimiter := rate.NewLimiter(rate.Limit(rateLimit), rateLimit)
+
+	// Create event queue channel
+	eventQueue := make(chan SecretEvent, 100)
+
+	// Start queue processor goroutine
+	go processDebouncedSecretQueue(ctx, eventQueue, time.Duration(debounceSeconds)*time.Second, rateLimiter, clientset, sourceNamespace, excludeNamespaceLabel, log)
+
+	// Create informer factory with namespace and label selector
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		clientset,
+		0,
+		informers.WithNamespace(sourceNamespace),
+		informers.WithTweakListOptions(func(opts *metav1.ListOptions) {
+			opts.LabelSelector = "push-to-k8s=source"
+		}),
+	)
+
+	secretInformer := factory.Core().V1().Secrets().Informer()
+
+	// Add event handlers
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("Recovered from panic while adding secret event handler: %v", r)
+		}
+	}()
+
+	_, err := secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			secret, ok := obj.(*v1.Secret)
+			if !ok {
+				log.Errorf("Failed to cast object to Secret in AddFunc")
+				return
+			}
+			log.Infof("Source secret added: %s", secret.Name)
+			eventQueue <- SecretEvent{
+				EventType: "add",
+				Secret:    secret.DeepCopy(),
+				Name:      secret.Name,
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldSecret, ok := oldObj.(*v1.Secret)
+			if !ok {
+				log.Errorf("Failed to cast old object to Secret in UpdateFunc")
+				return
+			}
+			newSecret, ok := newObj.(*v1.Secret)
+			if !ok {
+				log.Errorf("Failed to cast new object to Secret in UpdateFunc")
+				return
+			}
+
+			// Only trigger sync if secret data actually changed
+			if !compareSecrets(oldSecret, newSecret) {
+				log.Infof("Source secret updated: %s", newSecret.Name)
+				eventQueue <- SecretEvent{
+					EventType: "update",
+					Secret:    newSecret.DeepCopy(),
+					Name:      newSecret.Name,
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			secret, ok := obj.(*v1.Secret)
+			if !ok {
+				log.Errorf("Failed to cast object to Secret in DeleteFunc")
+				return
+			}
+			log.Infof("Source secret deleted: %s", secret.Name)
+			eventQueue <- SecretEvent{
+				EventType: "delete",
+				Secret:    nil,
+				Name:      secret.Name,
+			}
+		},
+	})
+	if err != nil {
+		log.Errorf("Failed to add event handler for secret informer: %v", err)
+		return
+	}
+
+	// Start the informer
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+
+	// Wait for the informer cache to sync
+	if !cache.WaitForCacheSync(stopCh, secretInformer.HasSynced) {
+		log.Error("Failed to sync secret informer cache")
+		close(stopCh)
+		return
+	}
+
+	log.Info("Source secret watcher started successfully")
+
+	// Wait for context cancellation
+	<-ctx.Done()
+	log.Info("Source secret watcher received shutdown signal")
+	close(stopCh)
+	close(eventQueue)
 }

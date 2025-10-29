@@ -47,6 +47,9 @@ func main() {
 	startPeriodicSync(ctx, &wg, clientset, cfg, log)
 	startNamespaceWatcher(ctx, &wg, clientset, cfg, log)
 
+	// Start secret watcher for real-time change detection
+	startSecretWatcher(ctx, &wg, clientset, cfg, log)
+
 	// Start periodic metrics updates
 	startMetricsUpdater(ctx, &wg, clientset, cfg, log)
 
@@ -157,5 +160,19 @@ func startMetricsUpdater(ctx context.Context, wg *sync.WaitGroup, clientset *kub
 				metrics.SyncMetrics(clientset, cfg.Namespace, log)
 			}
 		}
+	}()
+}
+
+func startSecretWatcher(ctx context.Context, wg *sync.WaitGroup, clientset *kubernetes.Clientset, cfg config.Config, log *logrus.Logger) {
+	if !cfg.EnableSecretWatcher {
+		log.Info("Secret watcher is disabled via configuration")
+		return
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer log.Info("Secret watcher goroutine stopped")
+		k8s.WatchSourceSecrets(ctx, clientset, cfg.Namespace, cfg.ExcludeNamespaceLabel, cfg.SecretSyncDebounce, cfg.SecretSyncRateLimit, log)
 	}()
 }

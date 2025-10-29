@@ -12,13 +12,18 @@ type Config struct {
 	MetricsPort           int
 	Namespace             string
 	ExcludeNamespaceLabel string
-	SyncInterval          int // Interval in minutes
+	SyncInterval          int  // Interval in minutes
+	SecretSyncDebounce    int  // Debounce window in seconds for batching secret changes
+	SecretSyncRateLimit   int  // Rate limit for sync operations (ops per second)
+	EnableSecretWatcher   bool // Enable/disable secret watcher
 }
 
 // LoadConfigFromEnv loads the configuration from environment variables.
 func LoadConfigFromEnv() Config {
 	metricsPort := parseEnvInt("METRICS_PORT", 9090)
 	syncInterval := parseEnvInt("SYNC_INTERVAL", 15) // Default to 15 minutes
+	secretSyncDebounce := parseEnvInt("SECRET_SYNC_DEBOUNCE_SECONDS", 5)
+	secretSyncRateLimit := parseEnvInt("SECRET_SYNC_RATE_LIMIT", 10)
 
 	// Validate MetricsPort range (1-65535)
 	if metricsPort < 1 || metricsPort > 65535 {
@@ -32,12 +37,27 @@ func LoadConfigFromEnv() Config {
 		syncInterval = 15
 	}
 
+	// Validate SecretSyncDebounce range (1-60 seconds)
+	if secretSyncDebounce < 1 || secretSyncDebounce > 60 {
+		log.Printf("WARNING: SECRET_SYNC_DEBOUNCE_SECONDS value %d is out of valid range (1-60 seconds). Using default value: 5", secretSyncDebounce)
+		secretSyncDebounce = 5
+	}
+
+	// Validate SecretSyncRateLimit range (1-100 ops per second)
+	if secretSyncRateLimit < 1 || secretSyncRateLimit > 100 {
+		log.Printf("WARNING: SECRET_SYNC_RATE_LIMIT value %d is out of valid range (1-100 ops/sec). Using default value: 10", secretSyncRateLimit)
+		secretSyncRateLimit = 10
+	}
+
 	config := Config{
 		Debug:                 parseEnvBool("DEBUG"),
 		MetricsPort:           metricsPort,
 		Namespace:             getEnvOrDefault("NAMESPACE", ""),
 		ExcludeNamespaceLabel: getEnvOrDefault("EXCLUDE_NAMESPACE_LABEL", ""),
 		SyncInterval:          syncInterval,
+		SecretSyncDebounce:    secretSyncDebounce,
+		SecretSyncRateLimit:   secretSyncRateLimit,
+		EnableSecretWatcher:   parseEnvBoolWithDefault("ENABLE_SECRET_WATCHER", true),
 	}
 
 	return config
@@ -69,5 +89,14 @@ func parseEnvInt(key string, defaultValue int) int {
 // parseEnvBool parses the value of the environment variable with the given key as a boolean.
 func parseEnvBool(key string) bool {
 	value := os.Getenv(key)
+	return value == "true"
+}
+
+// parseEnvBoolWithDefault parses the value of the environment variable with the given key as a boolean with a default value.
+func parseEnvBoolWithDefault(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
 	return value == "true"
 }

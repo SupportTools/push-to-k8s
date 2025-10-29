@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+    <g transform="translate(20, 20)">
+        <!-- Kubernetes-style Hexagon -->
+        <path d="M 20 0 L 38 10 L 38 30 L 20 40 L 2 30 L 2 10 Z"
+              fill="none"
+              stroke="#326CE5"
+              stroke-width="3"
+              stroke-linejoin="round"/>
+
+        <!-- Center hub -->
+        <circle cx="20" cy="20" r="4" fill="#326CE5"/>
+
+        <!-- Spokes -->
+        <path d="M 20 20 L 20 6 M 20 20 L 32 14 M 20 20 L 32 26
+                 M 20 20 L 20 34 M 20 20 L 8 26 M 20 20 L 8 14"
+              stroke="#326CE5"
+              stroke-width="2"
+              stroke-linecap="round"/>
+
+        <!-- Push Arrow -->
+        <path d="M 30 20 L 42 20 M 38 16 L 42 20 L 38 24"
+              stroke="#326CE5"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"/>
+    </g>
+</svg>
