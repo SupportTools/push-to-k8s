@@ -418,6 +418,13 @@ func processDebouncedSecretQueue(ctx context.Context, eventQueue <-chan SecretEv
 	}
 
 	for {
+		// Use nil-safe channel pattern to prevent panic when timer is nil
+		// A nil channel in select blocks forever (never selected)
+		var timerC <-chan time.Time
+		if timer != nil {
+			timerC = timer.C
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("Secret queue processor shutting down...")
@@ -450,7 +457,7 @@ func processDebouncedSecretQueue(ctx context.Context, eventQueue <-chan SecretEv
 				timer.Reset(debounceWindow)
 			}
 
-		case <-timer.C:
+		case <-timerC:
 			// Debounce window expired, process batch
 			processBatch()
 			timer = nil
