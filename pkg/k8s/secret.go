@@ -62,16 +62,32 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 		}
 
 		// Secret exists but is different, update it
-		sourceSecretCopy := sourceSecret.DeepCopy()
-		sourceSecretCopy.Namespace = namespace
-		sourceSecretCopy.ResourceVersion = existingSecret.ResourceVersion // Preserve ResourceVersion for updates
-		// Remove source label to avoid confusion (target secrets should not have the source label)
-		if sourceSecretCopy.Labels != nil {
-			delete(sourceSecretCopy.Labels, "push-to-k8s")
+		// Start with existing secret to preserve UID and other Kubernetes-managed metadata
+		existingSecret.Data = sourceSecret.Data
+		existingSecret.StringData = sourceSecret.StringData
+		existingSecret.Type = sourceSecret.Type
+
+		// Copy labels from source but exclude the source label
+		if existingSecret.Labels == nil {
+			existingSecret.Labels = make(map[string]string)
 		}
+		for k, v := range sourceSecret.Labels {
+			if k != "push-to-k8s" { // Don't copy source label to target secrets
+				existingSecret.Labels[k] = v
+			}
+		}
+
+		// Copy annotations from source
+		if existingSecret.Annotations == nil {
+			existingSecret.Annotations = make(map[string]string)
+		}
+		for k, v := range sourceSecret.Annotations {
+			existingSecret.Annotations[k] = v
+		}
+
 		updateCtx, updateCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer updateCancel()
-		_, err = clientset.CoreV1().Secrets(namespace).Update(updateCtx, sourceSecretCopy, metav1.UpdateOptions{})
+		_, err = clientset.CoreV1().Secrets(namespace).Update(updateCtx, existingSecret, metav1.UpdateOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to update secret %s in namespace %s: %w", sourceSecret.Name, namespace, err)
 		}
@@ -83,7 +99,12 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 	// Secret does not exist, create it
 	sourceSecretCopy := sourceSecret.DeepCopy()
 	sourceSecretCopy.Namespace = namespace
+	// Clear metadata fields to allow Kubernetes to generate fresh identifiers
 	sourceSecretCopy.ResourceVersion = ""
+	sourceSecretCopy.UID = ""
+	sourceSecretCopy.CreationTimestamp = metav1.Time{}
+	sourceSecretCopy.Generation = 0
+	sourceSecretCopy.ManagedFields = nil
 	// Remove source label to avoid confusion (target secrets should not have the source label)
 	if sourceSecretCopy.Labels != nil {
 		delete(sourceSecretCopy.Labels, "push-to-k8s")
