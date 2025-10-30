@@ -7,10 +7,10 @@ type: application
 
 # Chart version - incremented with chart changes
 # Follows Semantic Versioning (https://semver.org/)
-version: 1.1.1
+version: 1.1.2
 
 # Application version - matches the push-to-k8s controller version
-appVersion: "1.1.1"
+appVersion: "1.1.2"
 
 keywords:
   - kubernetes
