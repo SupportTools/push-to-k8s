@@ -63,7 +63,7 @@ spec:
       serviceAccountName: push-to-k8s
       containers:
         - name: push-to-k8s
-          image: cube8021/push-to-k8s:v1.1.2
+          image: cube8021/push-to-k8s:v1.1.3
           imagePullPolicy: Always
           ports:
             - name: metrics

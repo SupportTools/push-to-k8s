@@ -525,3 +525,57 @@ func TestSyncSecretsToSingleNamespace(t *testing.T) {
 		}
 	})
 }
+
+// TestSyncSecretToNamespaceDropsOwnerReferences verifies that a created copy does not
+// inherit the source Secret's ownerReferences or finalizers. An ESO-managed source
+// Secret is owned by an ExternalSecret in the source namespace; a copy that kept that
+// ownerReference would be garbage-collected in the target namespace.
+func TestSyncSecretToNamespaceDropsOwnerReferences(t *testing.T) {
+	logger := newTestLogger()
+	clientset := fake.NewSimpleClientset()
+
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}}
+	if _, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create test namespace: %v", err)
+	}
+
+	controller := true
+	sourceSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "push-to-k8s",
+			Labels:    map[string]string{"push-to-k8s": "source"},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "external-secrets.io/v1",
+				Kind:       "ExternalSecret",
+				Name:       "test-secret",
+				UID:        "11111111-2222-3333-4444-555555555555",
+				Controller: &controller,
+			}},
+			Finalizers: []string{"example.com/finalizer"},
+		},
+		Data: map[string][]byte{"key1": []byte("value1")},
+	}
+
+	if err := syncSecretToNamespace(clientset, sourceSecret, "target-ns", "", logger); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, err := clientset.CoreV1().Secrets("target-ns").Get(context.TODO(), "test-secret", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get created secret: %v", err)
+	}
+	if len(result.OwnerReferences) != 0 {
+		t.Errorf("expected no ownerReferences on created copy, got %v", result.OwnerReferences)
+	}
+	if len(result.Finalizers) != 0 {
+		t.Errorf("expected no finalizers on created copy, got %v", result.Finalizers)
+	}
+	if !equalByteMaps(result.Data, sourceSecret.Data) {
+		t.Error("secret data does not match source")
+	}
+	// The source object must not be mutated by the sync.
+	if len(sourceSecret.OwnerReferences) != 1 {
+		t.Error("source secret ownerReferences were mutated")
+	}
+}

@@ -105,6 +105,11 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 	sourceSecretCopy.CreationTimestamp = metav1.Time{}
 	sourceSecretCopy.Generation = 0
 	sourceSecretCopy.ManagedFields = nil
+	// Owner references and finalizers belong to the source namespace (e.g. an ESO
+	// ExternalSecret owning the source Secret). A copy carrying an ownerReference whose
+	// UID does not exist in the target namespace is garbage-collected within seconds.
+	sourceSecretCopy.OwnerReferences = nil
+	sourceSecretCopy.Finalizers = nil
 	// Remove source label to avoid confusion (target secrets should not have the source label)
 	if sourceSecretCopy.Labels != nil {
 		delete(sourceSecretCopy.Labels, "push-to-k8s")
