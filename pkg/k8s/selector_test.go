@@ -154,3 +154,21 @@ func TestNoSelectorUnchanged(t *testing.T) {
 		t.Error("source without selector must still go to every namespace")
 	}
 }
+
+// A Secret with ownerReferences belongs to another controller (ESO's ExternalSecret, cert-manager...).
+// Even with identical data and the same name it is not ours to prune: deleting it would fight its owner.
+func TestPruneNeverTouchesOwnedSecret(t *testing.T) {
+	withPrune(t, true)
+	src := selSource("tls.support.tools/wildcard=true")
+	controller := true
+	owned := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "other",
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: "external-secrets.io/v1", Kind: "ExternalSecret", Name: "wild", UID: "u1", Controller: &controller}}},
+		Data: src.Data}
+	c := fake.NewSimpleClientset(ns("other", nil), owned)
+	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if get(t, c, "other") == nil {
+		t.Error("an ESO-owned Secret with identical data was pruned")
+	}
+}

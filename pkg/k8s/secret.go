@@ -53,9 +53,13 @@ func namespaceSelected(clientset kubernetes.Interface, source *v1.Secret, ns str
 	return sel.Matches(labels.Set(n.Labels)), nil
 }
 
-// isCopyOf reports whether existing is a push-to-k8s copy of source: it carries the copy marker, or (copies
-// written before the marker existed) its data is byte-identical to the source's.
+// isCopyOf reports whether existing is a push-to-k8s copy of source: it has no ownerReferences, and it carries
+// the copy marker or (copies written before the marker existed) its data is byte-identical to the source's.
 func isCopyOf(existing, source *v1.Secret) bool {
+	// Owned by another controller (ESO ExternalSecret, cert-manager...): never ours, whatever its data.
+	if len(existing.OwnerReferences) > 0 {
+		return false
+	}
 	if existing.Labels[CopyOfLabel] == source.Name {
 		return true
 	}
