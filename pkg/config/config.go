@@ -16,6 +16,7 @@ type Config struct {
 	SecretSyncDebounce    int  // Debounce window in seconds for batching secret changes
 	SecretSyncRateLimit   int  // Rate limit for sync operations (ops per second)
 	EnableSecretWatcher   bool // Enable/disable secret watcher
+	PruneUnselected       bool // Delete copies from namespaces a source's namespace selector no longer matches
 }
 
 // LoadConfigFromEnv loads the configuration from environment variables.
@@ -58,6 +59,7 @@ func LoadConfigFromEnv() Config {
 		SecretSyncDebounce:    secretSyncDebounce,
 		SecretSyncRateLimit:   secretSyncRateLimit,
 		EnableSecretWatcher:   parseEnvBoolWithDefault("ENABLE_SECRET_WATCHER", true),
+		PruneUnselected:       parseEnvBool("PRUNE_UNSELECTED"),
 	}
 
 	return config

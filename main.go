@@ -20,6 +20,7 @@ import (
 func main() {
 	// Load configuration from environment
 	cfg := config.LoadConfigFromEnv()
+	k8s.PruneUnselected = cfg.PruneUnselected
 
 	// Setup logging with debug level from config
 	log := logging.SetupLogging(cfg.Debug)

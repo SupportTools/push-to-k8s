@@ -197,6 +197,7 @@ func TestCompareSecrets(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:            "secret1",
 					ResourceVersion: "123",
+					Labels:          map[string]string{CopyOfLabel: "secret1"},
 				},
 				Data: map[string][]byte{"key1": []byte("value1")},
 			},
@@ -208,6 +209,19 @@ func TestCompareSecrets(t *testing.T) {
 				Data: map[string][]byte{"key1": []byte("value1")},
 			},
 			expected: true,
+		},
+		{
+			// A copy written before the copy-of marker existed must be refreshed once to get the marker.
+			name: "unmarked copy with identical data is stale",
+			existing: &v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "secret1"},
+				Data:       map[string][]byte{"key1": []byte("value1")},
+			},
+			source: &v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "secret1"},
+				Data:       map[string][]byte{"key1": []byte("value1")},
+			},
+			expected: false,
 		},
 	}
 

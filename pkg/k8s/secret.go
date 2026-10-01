@@ -10,10 +10,84 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
+
+// NamespaceSelectorAnnotation, set on a SOURCE Secret, limits its copies to namespaces whose labels match
+// this label selector (e.g. "tls.support.tools/wildcard=true"). Without it a source goes to every namespace.
+const NamespaceSelectorAnnotation = "push-to-k8s.supporttools.io/namespace-selector"
+
+// CopyOfLabel marks every copy push-to-k8s writes with the source Secret's name, so pruning can tell a copy
+// from an unrelated Secret that happens to share the name.
+const CopyOfLabel = "push-to-k8s.supporttools.io/copy-of"
+
+// PruneUnselected deletes copies from namespaces that no longer match a source's namespace selector. Off by
+// default: the first rollout of a selector should only log what it would prune (env PRUNE_UNSELECTED).
+var PruneUnselected bool
+
+// isControllerAnnotation reports annotations that configure push-to-k8s on the source and must not be copied.
+func isControllerAnnotation(key string) bool {
+	return strings.HasPrefix(key, "push-to-k8s.supporttools.io/")
+}
+
+// namespaceSelected reports whether namespace ns is a target of source. A source without a selector targets
+// every namespace. An unparsable selector is an error: the caller must neither copy nor prune.
+func namespaceSelected(clientset kubernetes.Interface, source *v1.Secret, ns string) (bool, error) {
+	raw, ok := source.Annotations[NamespaceSelectorAnnotation]
+	if !ok {
+		return true, nil
+	}
+	sel, err := labels.Parse(raw)
+	if err != nil {
+		return false, fmt.Errorf("source %s: invalid %s %q: %w", source.Name, NamespaceSelectorAnnotation, raw, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	n, err := clientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Errorf("get namespace %s: %w", ns, err)
+	}
+	return sel.Matches(labels.Set(n.Labels)), nil
+}
+
+// isCopyOf reports whether existing is a push-to-k8s copy of source: it carries the copy marker, or (copies
+// written before the marker existed) its data is byte-identical to the source's.
+func isCopyOf(existing, source *v1.Secret) bool {
+	if existing.Labels[CopyOfLabel] == source.Name {
+		return true
+	}
+	return len(source.Data) > 0 && equalByteMaps(existing.Data, source.Data)
+}
+
+// pruneCopy removes source's copy from a namespace the source no longer targets. It never deletes a Secret
+// that is not a copy, and only logs when PruneUnselected is off.
+func pruneCopy(clientset kubernetes.Interface, source *v1.Secret, ns string, log *logrus.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	existing, err := clientset.CoreV1().Secrets(ns).Get(ctx, source.Name, metav1.GetOptions{})
+	if err != nil {
+		if isNotFoundError(err) {
+			return nil
+		}
+		return err
+	}
+	if !isCopyOf(existing, source) {
+		log.Warnf("Secret %s in namespace %s is not a copy of the source; leaving it alone", source.Name, ns)
+		return nil
+	}
+	if !PruneUnselected {
+		log.Infof("Would prune %s from namespace %s (not selected; PRUNE_UNSELECTED is off)", source.Name, ns)
+		return nil
+	}
+	if err := clientset.CoreV1().Secrets(ns).Delete(ctx, source.Name, metav1.DeleteOptions{}); err != nil && !isNotFoundError(err) {
+		return fmt.Errorf("prune %s from %s: %w", source.Name, ns, err)
+	}
+	log.Infof("Pruned %s from namespace %s (not selected by %s)", source.Name, ns, NamespaceSelectorAnnotation)
+	return nil
+}
 
 // isDataBearingAnnotation reports whether an annotation embeds a full copy of the applied object,
 // Secret data included: kubectl's client-side-apply record and wrangler/Rancher's objectset record
@@ -70,6 +144,15 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 		}
 	}
 
+	// Per-source namespace targeting: not selected -> prune any copy (or log), never create one.
+	selected, err := namespaceSelected(clientset, sourceSecret, namespace)
+	if err != nil {
+		return err
+	}
+	if !selected {
+		return pruneCopy(clientset, sourceSecret, namespace, log)
+	}
+
 	// Check if the secret already exists in the target namespace
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -102,10 +185,11 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 			existingSecret.Annotations = make(map[string]string)
 		}
 		for k, v := range sourceSecret.Annotations {
-			if !isDataBearingAnnotation(k) {
+			if !isDataBearingAnnotation(k) && !isControllerAnnotation(k) {
 				existingSecret.Annotations[k] = v
 			}
 		}
+		existingSecret.Labels[CopyOfLabel] = sourceSecret.Name
 		// Drop any left by an older push-to-k8s, which copied them verbatim.
 		for k := range existingSecret.Annotations {
 			if isDataBearingAnnotation(k) {
@@ -139,10 +223,14 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 	sourceSecretCopy.OwnerReferences = nil
 	sourceSecretCopy.Finalizers = nil
 	for k := range sourceSecretCopy.Annotations {
-		if isDataBearingAnnotation(k) {
+		if isDataBearingAnnotation(k) || isControllerAnnotation(k) {
 			delete(sourceSecretCopy.Annotations, k)
 		}
 	}
+	if sourceSecretCopy.Labels == nil {
+		sourceSecretCopy.Labels = map[string]string{}
+	}
+	sourceSecretCopy.Labels[CopyOfLabel] = sourceSecret.Name
 	// Remove source label to avoid confusion (target secrets should not have the source label)
 	if sourceSecretCopy.Labels != nil {
 		delete(sourceSecretCopy.Labels, "push-to-k8s")
@@ -162,6 +250,10 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 func compareSecrets(existingSecret, sourceSecret *v1.Secret) bool {
 	// A copy still carrying a data-bearing annotation is stale even when its data matches.
 	if hasDataBearingAnnotation(existingSecret) {
+		return false
+	}
+	// A copy without the copy-of marker is stale too, so every copy gets marked once and becomes prunable.
+	if existingSecret.Labels[CopyOfLabel] != sourceSecret.Name {
 		return false
 	}
 
