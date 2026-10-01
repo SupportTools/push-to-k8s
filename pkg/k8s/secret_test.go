@@ -579,3 +579,84 @@ func TestSyncSecretToNamespaceDropsOwnerReferences(t *testing.T) {
 		t.Error("source secret ownerReferences were mutated")
 	}
 }
+
+// Annotations that embed a full copy of the applied object, data included. Copying them would
+// put a decodable second copy of every fanned-out credential into each namespace's metadata
+// (found live 2026-10-01: 597 copies, cluster-services-760).
+func sourceWithDataBearingAnnotations() *v1.Secret {
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "push-to-k8s",
+			Labels:    map[string]string{"push-to-k8s": "source"},
+			Annotations: map[string]string{
+				"kubectl.kubernetes.io/last-applied-configuration": `{"data":{"key1":"dmFsdWUx"}}`,
+				"objectset.rio.cattle.io/applied":                  "H4sIAAAAAAAA/0rOzy0oSi0uTk1RslIqS8wpTVWqBQQAAP//",
+				"objectset.rio.cattle.io/id":                       "some-objectset",
+				"example.com/keep":                                 "yes",
+			},
+		},
+		Data: map[string][]byte{"key1": []byte("value1")},
+	}
+}
+
+func assertNoDataBearingAnnotations(t *testing.T, s *v1.Secret) {
+	t.Helper()
+	for k := range s.Annotations {
+		if isDataBearingAnnotation(k) {
+			t.Errorf("copy carries data-bearing annotation %q", k)
+		}
+	}
+	if s.Annotations["example.com/keep"] != "yes" {
+		t.Errorf("ordinary annotation was not copied: %v", s.Annotations)
+	}
+}
+
+func TestSyncSecretToNamespaceCreateDropsDataBearingAnnotations(t *testing.T) {
+	clientset := fake.NewSimpleClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}})
+	src := sourceWithDataBearingAnnotations()
+	if err := syncSecretToNamespace(clientset, src, "target-ns", "", newTestLogger()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := clientset.CoreV1().Secrets("target-ns").Get(context.TODO(), "test-secret", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get copy: %v", err)
+	}
+	assertNoDataBearingAnnotations(t, got)
+	if len(src.Annotations) != 4 {
+		t.Error("source secret annotations were mutated")
+	}
+}
+
+// A copy written by an older push-to-k8s already carries the annotations and has identical
+// data. The sync must still clean it, not skip it as up-to-date.
+func TestSyncSecretToNamespaceCleansStaleDataBearingAnnotations(t *testing.T) {
+	stale := sourceWithDataBearingAnnotations()
+	stale.Namespace = "target-ns"
+	stale.Labels = nil
+	clientset := fake.NewSimpleClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}}, stale)
+	if err := syncSecretToNamespace(clientset, sourceWithDataBearingAnnotations(), "target-ns", "", newTestLogger()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := clientset.CoreV1().Secrets("target-ns").Get(context.TODO(), "test-secret", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get copy: %v", err)
+	}
+	assertNoDataBearingAnnotations(t, got)
+}
+
+func TestIsDataBearingAnnotation(t *testing.T) {
+	for k, want := range map[string]bool{
+		"kubectl.kubernetes.io/last-applied-configuration": true,
+		"objectset.rio.cattle.io/applied":                  true,
+		"objectset.rio.cattle.io/id":                       true,
+		"objectset.rio.cattle.io/owner-name":               true,
+		"reconcile.external-secrets.io/data-hash":          false,
+		"kubectl.kubernetes.io/restartedAt":                false,
+		"example.com/keep":                                 false,
+	} {
+		if got := isDataBearingAnnotation(k); got != want {
+			t.Errorf("isDataBearingAnnotation(%q) = %v, want %v", k, got, want)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -13,6 +14,25 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
+
+// isDataBearingAnnotation reports whether an annotation embeds a full copy of the applied object,
+// Secret data included: kubectl's client-side-apply record and wrangler/Rancher's objectset record
+// (gzip+base64 JSON). Copying either onto every target namespace spreads a decodable second copy
+// of the credential through metadata, which kubectl describe and UIs show while masking .data.
+func isDataBearingAnnotation(key string) bool {
+	return key == "kubectl.kubernetes.io/last-applied-configuration" ||
+		strings.HasPrefix(key, "objectset.rio.cattle.io/")
+}
+
+// hasDataBearingAnnotation reports whether a Secret carries any isDataBearingAnnotation key.
+func hasDataBearingAnnotation(s *v1.Secret) bool {
+	for k := range s.Annotations {
+		if isDataBearingAnnotation(k) {
+			return true
+		}
+	}
+	return false
+}
 
 // getSourceSecrets fetches secrets from the source namespace with the label push-to-k8s=source.
 // Returns an empty slice if no secrets are found (which is a valid state).
@@ -82,7 +102,15 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 			existingSecret.Annotations = make(map[string]string)
 		}
 		for k, v := range sourceSecret.Annotations {
-			existingSecret.Annotations[k] = v
+			if !isDataBearingAnnotation(k) {
+				existingSecret.Annotations[k] = v
+			}
+		}
+		// Drop any left by an older push-to-k8s, which copied them verbatim.
+		for k := range existingSecret.Annotations {
+			if isDataBearingAnnotation(k) {
+				delete(existingSecret.Annotations, k)
+			}
 		}
 
 		updateCtx, updateCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -110,6 +138,11 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 	// UID does not exist in the target namespace is garbage-collected within seconds.
 	sourceSecretCopy.OwnerReferences = nil
 	sourceSecretCopy.Finalizers = nil
+	for k := range sourceSecretCopy.Annotations {
+		if isDataBearingAnnotation(k) {
+			delete(sourceSecretCopy.Annotations, k)
+		}
+	}
 	// Remove source label to avoid confusion (target secrets should not have the source label)
 	if sourceSecretCopy.Labels != nil {
 		delete(sourceSecretCopy.Labels, "push-to-k8s")
@@ -127,6 +160,11 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 
 // compareSecrets compares two secrets and returns true if they are identical.
 func compareSecrets(existingSecret, sourceSecret *v1.Secret) bool {
+	// A copy still carrying a data-bearing annotation is stale even when its data matches.
+	if hasDataBearingAnnotation(existingSecret) {
+		return false
+	}
+
 	// Compare Data field
 	if !equalByteMaps(existingSecret.Data, sourceSecret.Data) {
 		return false
