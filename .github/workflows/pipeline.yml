@@ -41,6 +41,8 @@ jobs:
       - name: Install static analysis tools
         run: |
           go install github.com/remyoudompheng/go-misc/deadcode@v0.0.0-20190427085024-2d6ac652a50e
+          # Without setup-go, $(go env GOPATH)/bin is not on PATH; add it.
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           go version
           staticcheck -version
           gosec -version
