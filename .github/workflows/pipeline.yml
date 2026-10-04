@@ -15,7 +15,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: "1.22"
+          # 1.25.12 is pre-populated in the ARC runner image's tool cache, so
+          # setup-go resolves it locally instead of downloading a toolchain on
+          # every run (taskforge-2674). go.mod's 1.22 / toolchain 1.22.5 builds
+          # fine under it with the runner's GOTOOLCHAIN=local.
+          go-version: "1.25.12"
           # The ARC runner exports GOCACHE/GOMODCACHE on a shared warm hostPath;
           # setup-go's post-step would try to tar and upload that whole cache.
           cache: false
@@ -30,22 +34,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      # No job-time tool downloads (taskforge-2674, TaskForge
+      # docs/CI_RUNNER_CONTRACT.md "No job-time downloads"):
+      #   - staticcheck and gosec are baked into the ARC runner image.
+      #   - deadcode is not baked, so it is pinned to an exact version and
+      #     resolved through the runner's GOPROXY (Athens), never @latest.
+      #   - golint is deprecated/frozen upstream and is dropped; staticcheck
+      #     and go vet cover it.
+      #   - go-mod-outdated was installed but never run, so it is dropped.
+      # The old GOTOOLCHAIN=auto override existed only so the @latest tools
+      # could download a newer Go; with Go 1.25.12 from the tool cache it is gone.
       - name: Install static analysis tools
-        # The on-prem ARC runner image sets GOTOOLCHAIN=local; GitHub-hosted runners
-        # default to auto. These @latest tools require a newer Go than go.mod's 1.22,
-        # so let `go install` fetch the toolchain it needs (hosted-runner behaviour).
-        env:
-          GOTOOLCHAIN: auto
         run: |
-          go install golang.org/x/lint/golint@latest
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          go install github.com/psampaz/go-mod-outdated@latest
-          go install github.com/remyoudompheng/go-misc/deadcode@latest
+          go install github.com/remyoudompheng/go-misc/deadcode@v0.0.0-20190427085024-2d6ac652a50e
+          go version
+          staticcheck -version
+          gosec -version
 
       - name: Go static analysis
         run: |
-          golint ./...
           staticcheck ./...
           go vet ./...
           deadcode .
@@ -118,8 +125,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext-base
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v4.2.0
+      # helm is baked into the ARC runner image; no azure/setup-helm download
+      # (taskforge-2674).
+      - name: Show baked helm version
+        run: helm version
 
       - name: Determine Chart Version
         id: get-chart-version
