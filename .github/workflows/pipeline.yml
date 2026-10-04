@@ -12,17 +12,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          # 1.25.12 is pre-populated in the ARC runner image's tool cache, so
-          # setup-go resolves it locally instead of downloading a toolchain on
-          # every run (taskforge-2674). go.mod's 1.22 / toolchain 1.22.5 builds
-          # fine under it with the runner's GOTOOLCHAIN=local.
-          go-version: "1.25.12"
-          # The ARC runner exports GOCACHE/GOMODCACHE on a shared warm hostPath;
-          # setup-go's post-step would try to tar and upload that whole cache.
-          cache: false
+      # No actions/setup-go step: the ARC runner image bakes Go 1.26.x at
+      # /usr/local/go (and in the tool cache) with GOTOOLCHAIN=local. Pinning
+      # setup-go to any other version downloads a toolchain at job time
+      # (taskforge-2674). go.mod's go 1.22 / toolchain 1.22.5 builds fine under
+      # the newer baked Go.
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -43,7 +37,7 @@ jobs:
       #     and go vet cover it.
       #   - go-mod-outdated was installed but never run, so it is dropped.
       # The old GOTOOLCHAIN=auto override existed only so the @latest tools
-      # could download a newer Go; with Go 1.25.12 from the tool cache it is gone.
+      # could download a newer Go; the baked Go is already newer, so it is gone.
       - name: Install static analysis tools
         run: |
           go install github.com/remyoudompheng/go-misc/deadcode@v0.0.0-20190427085024-2d6ac652a50e
@@ -120,10 +114,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install required packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gettext-base
+      # envsubst is baked into the ARC runner image; no apt-get install at job
+      # time (taskforge-2674).
+      - name: Show baked envsubst
+        run: command -v envsubst
 
       # helm is baked into the ARC runner image; no azure/setup-helm download
       # (taskforge-2674).
