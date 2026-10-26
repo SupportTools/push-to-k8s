@@ -33,7 +33,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 FROM alpine:3.18
 
 # Install ca-certificates and other necessary tools
-RUN apk add --no-cache ca-certificates bash curl
+# USN-8944-1: upgrade ca-certificates and ca-certificates-bundle so the leaked
+# eMudhra emSign roots (ECC G3, ECC C3, C1) are dropped from the trust bundle.
+RUN apk add --no-cache ca-certificates bash curl && \
+    apk upgrade --no-cache ca-certificates ca-certificates-bundle
 
 # Copy the statically compiled executable
 COPY --from=builder /push-to-k8s /push-to-k8s
