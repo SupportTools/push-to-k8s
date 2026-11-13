@@ -133,6 +133,28 @@ func getSourceSecrets(clientset kubernetes.Interface, sourceNamespace string, lo
 	return secretList.Items, nil
 }
 
+// currentSource re-reads source from the API server just before a copy is written. The returned bool is false
+// when the source no longer exists or no longer carries push-to-k8s=source; the caller must then write nothing
+// (the delete event path owns cleanup). A source without a namespace cannot be re-read and is used as given.
+func currentSource(clientset kubernetes.Interface, source *v1.Secret) (*v1.Secret, bool, error) {
+	if source.Namespace == "" {
+		return source, true, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fresh, err := clientset.CoreV1().Secrets(source.Namespace).Get(ctx, source.Name, metav1.GetOptions{})
+	if err != nil {
+		if isNotFoundError(err) {
+			return source, false, nil
+		}
+		return nil, false, fmt.Errorf("re-read source secret %s/%s: %w", source.Namespace, source.Name, err)
+	}
+	if fresh.Labels["push-to-k8s"] != "source" {
+		return fresh, false, nil
+	}
+	return fresh, true, nil
+}
+
 // syncSecretToNamespace ensures the given secret is synced to the specified namespace.
 func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secret, namespace, excludeNamespaceLabel string, log *logrus.Logger) error {
 	// Skip namespaces with the exclude label
@@ -146,6 +168,19 @@ func syncSecretToNamespace(clientset kubernetes.Interface, sourceSecret *v1.Secr
 				return nil
 			}
 		}
+	}
+
+	// The caller's copy of the source may be minutes old: SyncSecrets lists every source once and then walks
+	// every namespace. Re-read it so a change that landed mid-round (and was already pushed by the event
+	// path) is never written backwards.
+	sourceSecret, current, err := currentSource(clientset, sourceSecret)
+	if err != nil {
+		return err
+	}
+	if !current {
+		log.Infof("Source secret %s/%s is gone or no longer labelled push-to-k8s=source; not syncing it to %s",
+			sourceSecret.Namespace, sourceSecret.Name, namespace)
+		return nil
 	}
 
 	// Per-source namespace targeting: not selected -> prune any copy (or log), never create one.
