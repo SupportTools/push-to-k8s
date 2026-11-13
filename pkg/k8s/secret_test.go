@@ -571,6 +571,7 @@ func TestSyncSecretToNamespaceDropsOwnerReferences(t *testing.T) {
 		Data: map[string][]byte{"key1": []byte("value1")},
 	}
 
+	seedSource(t, clientset, sourceSecret)
 	if err := syncSecretToNamespace(clientset, sourceSecret, "target-ns", "", logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -629,6 +630,7 @@ func assertNoDataBearingAnnotations(t *testing.T, s *v1.Secret) {
 func TestSyncSecretToNamespaceCreateDropsDataBearingAnnotations(t *testing.T) {
 	clientset := fake.NewSimpleClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}})
 	src := sourceWithDataBearingAnnotations()
+	seedSource(t, clientset, src)
 	if err := syncSecretToNamespace(clientset, src, "target-ns", "", newTestLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -649,6 +651,7 @@ func TestSyncSecretToNamespaceCleansStaleDataBearingAnnotations(t *testing.T) {
 	stale.Namespace = "target-ns"
 	stale.Labels = nil
 	clientset := fake.NewSimpleClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}}, stale)
+	seedSource(t, clientset, sourceWithDataBearingAnnotations())
 	if err := syncSecretToNamespace(clientset, sourceWithDataBearingAnnotations(), "target-ns", "", newTestLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

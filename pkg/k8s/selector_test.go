@@ -47,7 +47,9 @@ func withPrune(t *testing.T, on bool) {
 
 func TestSelectorMatchingNamespaceGetsCopyWithMarker(t *testing.T) {
 	c := fake.NewSimpleClientset(ns("app", map[string]string{"tls.support.tools/wildcard": "true"}))
-	if err := syncSecretToNamespace(c, selSource("tls.support.tools/wildcard=true"), "app", "", newTestLogger()); err != nil {
+	src := selSource("tls.support.tools/wildcard=true")
+	seedSource(t, c, src)
+	if err := syncSecretToNamespace(c, src, "app", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
 	got := get(t, c, "app")
@@ -64,7 +66,9 @@ func TestSelectorMatchingNamespaceGetsCopyWithMarker(t *testing.T) {
 
 func TestSelectorNonMatchingNamespaceGetsNothing(t *testing.T) {
 	c := fake.NewSimpleClientset(ns("other", nil))
-	if err := syncSecretToNamespace(c, selSource("tls.support.tools/wildcard=true"), "other", "", newTestLogger()); err != nil {
+	src := selSource("tls.support.tools/wildcard=true")
+	seedSource(t, c, src)
+	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
 	if get(t, c, "other") != nil {
@@ -77,6 +81,7 @@ func TestPruneRemovesUnmarkedCopyWithIdenticalData(t *testing.T) {
 	src := selSource("tls.support.tools/wildcard=true")
 	old := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "other"}, Data: src.Data}
 	c := fake.NewSimpleClientset(ns("other", nil), old)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +96,7 @@ func TestPruneRemovesMarkedCopy(t *testing.T) {
 	old := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "other", Labels: map[string]string{CopyOfLabel: "wild"}},
 		Data: map[string][]byte{"tls.key": []byte("OLD")}}
 	c := fake.NewSimpleClientset(ns("other", nil), old)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +110,7 @@ func TestPruneOffKeepsCopy(t *testing.T) {
 	src := selSource("tls.support.tools/wildcard=true")
 	old := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "other"}, Data: src.Data}
 	c := fake.NewSimpleClientset(ns("other", nil), old)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +124,7 @@ func TestPruneNeverTouchesForeignSecretOfSameName(t *testing.T) {
 	src := selSource("tls.support.tools/wildcard=true")
 	foreign := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "other"}, Data: map[string][]byte{"x": []byte("mine")}}
 	c := fake.NewSimpleClientset(ns("other", nil), foreign)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +138,7 @@ func TestInvalidSelectorFailsSafe(t *testing.T) {
 	src := selSource("this is not a selector !!")
 	keep := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "wild", Namespace: "app"}, Data: src.Data}
 	c := fake.NewSimpleClientset(ns("app", map[string]string{"tls.support.tools/wildcard": "true"}), ns("other", nil), keep)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err == nil {
 		t.Error("invalid selector should return an error")
 	}
@@ -147,7 +156,9 @@ func TestInvalidSelectorFailsSafe(t *testing.T) {
 func TestNoSelectorUnchanged(t *testing.T) {
 	withPrune(t, true)
 	c := fake.NewSimpleClientset(ns("any", nil))
-	if err := syncSecretToNamespace(c, selSource(""), "any", "", newTestLogger()); err != nil {
+	src := selSource("")
+	seedSource(t, c, src)
+	if err := syncSecretToNamespace(c, src, "any", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
 	if get(t, c, "any") == nil {
@@ -165,6 +176,7 @@ func TestPruneNeverTouchesOwnedSecret(t *testing.T) {
 		OwnerReferences: []metav1.OwnerReference{{APIVersion: "external-secrets.io/v1", Kind: "ExternalSecret", Name: "wild", UID: "u1", Controller: &controller}}},
 		Data: src.Data}
 	c := fake.NewSimpleClientset(ns("other", nil), owned)
+	seedSource(t, c, src)
 	if err := syncSecretToNamespace(c, src, "other", "", newTestLogger()); err != nil {
 		t.Fatal(err)
 	}
