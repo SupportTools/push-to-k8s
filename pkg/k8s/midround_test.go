@@ -39,14 +39,12 @@ type writtenData struct {
 }
 
 func (w *writtenData) reactor(action k8stesting.Action) (bool, runtime.Object, error) {
-	var obj runtime.Object
-	switch a := action.(type) {
-	case k8stesting.CreateAction:
-		obj = a.GetObject()
-	case k8stesting.UpdateAction:
-		obj = a.GetObject()
+	// CreateAction and UpdateAction share this method set; the reactor is registered for both verbs.
+	a, ok := action.(interface{ GetObject() runtime.Object })
+	if !ok {
+		return false, nil, nil
 	}
-	if s, ok := obj.(*v1.Secret); ok && s.Namespace != midRoundSourceNS {
+	if s, ok := a.GetObject().(*v1.Secret); ok && s.Namespace != midRoundSourceNS {
 		w.mu.Lock()
 		w.writes = append(w.writes, s.Namespace+"="+string(s.Data["tls.crt"]))
 		w.mu.Unlock()
