@@ -45,7 +45,7 @@ RUN --mount=type=bind,source=build/noemsign-ca.sh,target=/tmp/noemsign-ca.sh \
  && sh /tmp/noemsign-ca.sh strip / \
  && sh /tmp/noemsign-ca.sh guard / \
  && sum0="$(tar -c /etc/ssl /usr/share/ca-certificates 2>/dev/null | sha256sum)" \
- && apk del --no-cache .noemsign \
+ && apk --no-network del .noemsign \
  && [ "$sum0" = "$(tar -c /etc/ssl /usr/share/ca-certificates 2>/dev/null | sha256sum)" ]
 
 # Copy the statically compiled executable
