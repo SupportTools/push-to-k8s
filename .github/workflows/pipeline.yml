@@ -95,6 +95,7 @@ jobs:
           docker buildx build \
           --platform linux/amd64 \
           --pull \
+          --build-arg APK_FALLBACK=none \
           --build-arg VERSION=${{ steps.determine-tag.outputs.tag }} \
           --build-arg GIT_COMMIT=${{ github.sha }} \
           --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
