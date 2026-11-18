@@ -33,7 +33,20 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 FROM alpine:3.18
 
 # Install ca-certificates and other necessary tools
-RUN apk add --no-cache ca-certificates bash curl
+# CA trust (cluster-services-1392, fleet CA standard 2026-11-13): no eMudhra emSign root at all (G1, ECC G3,
+# C1, ECC C3). build/noemsign-ca.sh (canonical copy: cluster-services noemsign/noemsign-ca.sh) deselects them
+# in /etc/ca-certificates.conf, strips every emSign certificate from every PEM file by decoded subject, and its
+# guard fails the build if one is left. openssl is a temporary virtual package; the trust store is checksummed
+# across its removal. Supersedes PR #8 (which still left emSign Root CA - G1).
+RUN --mount=type=bind,source=build/noemsign-ca.sh,target=/tmp/noemsign-ca.sh \
+    apk add --no-cache ca-certificates bash curl \
+ && apk upgrade --no-cache ca-certificates ca-certificates-bundle \
+ && apk add --no-cache --virtual .noemsign openssl \
+ && sh /tmp/noemsign-ca.sh strip / \
+ && sh /tmp/noemsign-ca.sh guard / \
+ && sum0="$(tar -c /etc/ssl /usr/share/ca-certificates 2>/dev/null | sha256sum)" \
+ && apk --no-network del .noemsign \
+ && [ "$sum0" = "$(tar -c /etc/ssl /usr/share/ca-certificates 2>/dev/null | sha256sum)" ]
 
 # Copy the statically compiled executable
 COPY --from=builder /push-to-k8s /push-to-k8s
